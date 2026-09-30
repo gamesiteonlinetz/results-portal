@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function active() { return signedIn() && profile().data.active == true; }
+    function academic() { return active() && profile().data.role in ['ADMIN', 'ACADEMIC_MASTER', 'EXAM_OFFICER']; }
+    function teacher() { return active() && profile().data.role == 'TEACHER'; }
+    function isTeacherRegistration() {
+      return signedIn() && request.auth.uid == uid
+        && request.resource.data.role == 'TEACHER'
+        && request.resource.data.active == false
+        && request.resource.data.email == request.auth.token.email;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid || academic();
+      allow list: if academic();
+      allow create: if isTeacherRegistration();
+      allow update, delete: if academic();
+    }
+
+    match /students/{id} {
+      allow read: if academic() || teacher();
+      allow create, update, delete: if academic();
+    }
+
+    match /results/{id} {
+      allow read: if academic() || (teacher() && resource.data.teacherId == request.auth.uid);
+      allow create: if teacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if academic() || (teacher() && resource.data.teacherId == request.auth.uid && request.resource.data.teacherId == request.auth.uid);
+      allow delete: if academic() || (teacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
